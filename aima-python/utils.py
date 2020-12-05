@@ -3,15 +3,16 @@
 import bisect
 import collections
 import collections.abc
-import functools
 import heapq
 import operator
 import os.path
 import random
-from itertools import chain, combinations
+import math
+import functools
 from statistics import mean
 
 import numpy as np
+from itertools import chain, combinations
 
 
 # ______________________________________________________________________________
@@ -20,7 +21,8 @@ import numpy as np
 
 def sequence(iterable):
     """Converts iterable to sequence, if it is not already one."""
-    return iterable if isinstance(iterable, collections.abc.Sequence) else tuple([iterable])
+    return (iterable if isinstance(iterable, collections.abc.Sequence)
+            else tuple([iterable]))
 
 
 def remove_all(item, seq):
@@ -84,19 +86,17 @@ def mode(data):
     return item
 
 
-def power_set(iterable):
-    """power_set([1,2,3]) --> (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"""
+def powerset(iterable):
+    """powerset([1,2,3]) --> (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"""
     s = list(iterable)
     return list(chain.from_iterable(combinations(s, r) for r in range(len(s) + 1)))[1:]
 
 
 def extend(s, var, val):
     """Copy dict s and extend it by setting var to val; return copy."""
-    return {**s, var: val}
-
-
-def flatten(seqs):
-    return sum(seqs, [])
+    s2 = s.copy()
+    s2[var] = val
+    return s2
 
 
 # ______________________________________________________________________________
@@ -104,15 +104,18 @@ def flatten(seqs):
 
 identity = lambda x: x
 
+argmin = min
+argmax = max
+
 
 def argmin_random_tie(seq, key=identity):
     """Return a minimum element of seq; break ties at random."""
-    return min(shuffled(seq), key=key)
+    return argmin(shuffled(seq), key=key)
 
 
 def argmax_random_tie(seq, key=identity):
     """Return an element with highest fn(seq[i]) score; break ties at random."""
-    return max(shuffled(seq), key=key)
+    return argmax(shuffled(seq), key=key)
 
 
 def shuffled(iterable):
@@ -138,30 +141,59 @@ def histogram(values, mode=0, bin_function=None):
         bins[val] = bins.get(val, 0) + 1
 
     if mode:
-        return sorted(list(bins.items()), key=lambda x: (x[1], x[0]), reverse=True)
+        return sorted(list(bins.items()), key=lambda x: (x[1], x[0]),
+                      reverse=True)
     else:
         return sorted(bins.items())
 
 
-def dot_product(x, y):
-    """Return the sum of the element-wise product of vectors x and y."""
-    return sum(_x * _y for _x, _y in zip(x, y))
+def dotproduct(X, Y):
+    """Return the sum of the element-wise product of vectors X and Y."""
+    return sum(x * y for x, y in zip(X, Y))
 
 
-def element_wise_product(x, y):
-    """Return vector as an element-wise product of vectors x and y."""
-    assert len(x) == len(y)
-    return np.multiply(x, y)
+def element_wise_product(X, Y):
+    """Return vector as an element-wise product of vectors X and Y"""
+    assert len(X) == len(Y)
+    return [x * y for x, y in zip(X, Y)]
 
 
-def matrix_multiplication(x, *y):
-    """Return a matrix as a matrix-multiplication of x and arbitrary number of matrices *y."""
+def matrix_multiplication(X_M, *Y_M):
+    """Return a matrix as a matrix-multiplication of X_M and arbitrary number of matrices *Y_M"""
 
-    result = x
-    for _y in y:
-        result = np.matmul(result, _y)
+    def _mat_mult(X_M, Y_M):
+        """Return a matrix as a matrix-multiplication of two matrices X_M and Y_M
+        >>> matrix_multiplication([[1, 2, 3],
+                                   [2, 3, 4]],
+                                   [[3, 4],
+                                    [1, 2],
+                                    [1, 0]])
+        [[8, 8],[13, 14]]
+        """
+        assert len(X_M[0]) == len(Y_M)
+
+        result = [[0 for i in range(len(Y_M[0]))] for j in range(len(X_M))]
+        for i in range(len(X_M)):
+            for j in range(len(Y_M[0])):
+                for k in range(len(Y_M)):
+                    result[i][j] += X_M[i][k] * Y_M[k][j]
+        return result
+
+    result = X_M
+    for Y in Y_M:
+        result = _mat_mult(result, Y)
 
     return result
+
+
+def vector_to_diagonal(v):
+    """Converts a vector to a diagonal matrix with vector elements
+    as the diagonal elements of the matrix"""
+    diag_matrix = [[0 for i in range(len(v))] for j in range(len(v))]
+    for i in range(len(v)):
+        diag_matrix[i][i] = v[i]
+
+    return diag_matrix
 
 
 def vector_add(a, b):
@@ -169,9 +201,25 @@ def vector_add(a, b):
     return tuple(map(operator.add, a, b))
 
 
-def scalar_vector_product(x, y):
+def scalar_vector_product(X, Y):
     """Return vector as a product of a scalar and a vector"""
-    return np.multiply(x, y)
+    return [X * y for y in Y]
+
+
+def scalar_matrix_product(X, Y):
+    """Return matrix as a product of a scalar and a matrix"""
+    return [scalar_vector_product(X, y) for y in Y]
+
+
+def inverse_matrix(X):
+    """Inverse a given square matrix of size 2x2"""
+    assert len(X) == 2
+    assert len(X[0]) == 2
+    det = X[0][0] * X[1][1] - X[0][1] * X[1][0]
+    assert det != 0
+    inv_mat = scalar_matrix_product(1.0 / det, [[X[1][1], -X[0][1]], [-X[1][0], X[0][0]]])
+
+    return inv_mat
 
 
 def probability(p):
@@ -184,6 +232,7 @@ def weighted_sample_with_replacement(n, seq, weights):
     probability of each element in proportion to its corresponding
     weight."""
     sample = weighted_sampler(seq, weights)
+
     return [sample() for _ in range(n)]
 
 
@@ -192,12 +241,13 @@ def weighted_sampler(seq, weights):
     totals = []
     for w in weights:
         totals.append(w + totals[-1] if totals else w)
+
     return lambda: seq[bisect.bisect(totals, random.uniform(0, totals[-1]))]
 
 
 def weighted_choice(choices):
     """A weighted version of random.choice"""
-    # NOTE: should be replaced by random.choices if we port to Python 3.6
+    # NOTE: Shoule be replaced by random.choices if we port to Python 3.6
 
     total = sum(w for _, w in choices)
     r = random.uniform(0, total)
@@ -218,7 +268,8 @@ def rounder(numbers, d=4):
 
 
 def num_or_str(x):  # TODO: rename as `atom`
-    """The argument is a string; convert to a number if possible, or strip it."""
+    """The argument is a string; convert to a number if
+       possible, or strip it."""
     try:
         return int(x)
     except ValueError:
@@ -228,40 +279,37 @@ def num_or_str(x):  # TODO: rename as `atom`
             return str(x).strip()
 
 
-def euclidean_distance(x, y):
-    return np.sqrt(sum((_x - _y) ** 2 for _x, _y in zip(x, y)))
+def euclidean_distance(X, Y):
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(X, Y)))
 
 
-def manhattan_distance(x, y):
-    return sum(abs(_x - _y) for _x, _y in zip(x, y))
+def cross_entropy_loss(X, Y):
+    n = len(X)
+    return (-1.0 / n) * sum(x * math.log(y) + (1 - x) * math.log(1 - y) for x, y in zip(X, Y))
 
 
-def hamming_distance(x, y):
-    return sum(_x != _y for _x, _y in zip(x, y))
+def rms_error(X, Y):
+    return math.sqrt(ms_error(X, Y))
 
 
-def cross_entropy_loss(x, y):
-    return (-1.0 / len(x)) * sum(_x * np.log(_y) + (1 - _x) * np.log(1 - _y) for _x, _y in zip(x, y))
+def ms_error(X, Y):
+    return mean((x - y) ** 2 for x, y in zip(X, Y))
 
 
-def mean_squared_error_loss(x, y):
-    return (1.0 / len(x)) * sum((_x - _y) ** 2 for _x, _y in zip(x, y))
+def mean_error(X, Y):
+    return mean(abs(x - y) for x, y in zip(X, Y))
 
 
-def rms_error(x, y):
-    return np.sqrt(ms_error(x, y))
+def manhattan_distance(X, Y):
+    return sum(abs(x - y) for x, y in zip(X, Y))
 
 
-def ms_error(x, y):
-    return mean((_x - _y) ** 2 for _x, _y in zip(x, y))
+def mean_boolean_error(X, Y):
+    return mean(x != y for x, y in zip(X, Y))
 
 
-def mean_error(x, y):
-    return mean(abs(_x - _y) for _x, _y in zip(x, y))
-
-
-def mean_boolean_error(x, y):
-    return mean(_x != _y for _x, _y in zip(x, y))
+def hamming_distance(X, Y):
+    return sum(x != y for x, y in zip(X, Y))
 
 
 def normalize(dist):
@@ -270,31 +318,54 @@ def normalize(dist):
         total = sum(dist.values())
         for key in dist:
             dist[key] = dist[key] / total
-            assert 0 <= dist[key] <= 1  # probabilities must be between 0 and 1
+            assert 0 <= dist[key] <= 1, "Probabilities must be between 0 and 1."
         return dist
     total = sum(dist)
     return [(n / total) for n in dist]
+
+
+def norm(X, n=2):
+    """Return the n-norm of vector X"""
+    return sum([x ** n for x in X]) ** (1 / n)
 
 
 def random_weights(min_value, max_value, num_weights):
     return [random.uniform(min_value, max_value) for _ in range(num_weights)]
 
 
-def sigmoid(x):
-    """Return activation value of x with sigmoid function."""
-    return 1 / (1 + np.exp(-x))
+def clip(x, lowest, highest):
+    """Return x clipped to the range [lowest..highest]."""
+    return max(lowest, min(x, highest))
 
 
 def sigmoid_derivative(value):
     return value * (1 - value)
 
 
+def sigmoid(x):
+    """Return activation value of x with sigmoid function"""
+    return 1 / (1 + math.exp(-x))
+
+
+def relu_derivative(value):
+    if value > 0:
+        return 1
+    else:
+        return 0
+
+
 def elu(x, alpha=0.01):
-    return x if x > 0 else alpha * (np.exp(x) - 1)
+    if x > 0:
+        return x
+    else:
+        return alpha * (math.exp(x) - 1)
 
 
 def elu_derivative(value, alpha=0.01):
-    return 1 if value > 0 else alpha * np.exp(value)
+    if value > 0:
+        return 1
+    else:
+        return alpha * math.exp(value)
 
 
 def tanh(x):
@@ -302,15 +373,21 @@ def tanh(x):
 
 
 def tanh_derivative(value):
-    return 1 - (value ** 2)
+    return (1 - (value ** 2))
 
 
 def leaky_relu(x, alpha=0.01):
-    return x if x > 0 else alpha * x
+    if x > 0:
+        return x
+    else:
+        return alpha * x
 
 
 def leaky_relu_derivative(value, alpha=0.01):
-    return 1 if value > 0 else alpha
+    if value > 0:
+        return 1
+    else:
+        return alpha
 
 
 def relu(x):
@@ -318,7 +395,10 @@ def relu(x):
 
 
 def relu_derivative(value):
-    return 1 if value > 0 else 0
+    if value > 0:
+        return 1
+    else:
+        return 0
 
 
 def step(x):
@@ -328,29 +408,79 @@ def step(x):
 
 def gaussian(mean, st_dev, x):
     """Given the mean and standard deviation of a distribution, it returns the probability of x."""
-    return 1 / (np.sqrt(2 * np.pi) * st_dev) * np.e ** (-0.5 * (float(x - mean) / st_dev) ** 2)
+    return 1 / (math.sqrt(2 * math.pi) * st_dev) * math.e ** (-0.5 * (float(x - mean) / st_dev) ** 2)
 
 
-def linear_kernel(x, y=None):
-    if y is None:
-        y = x
-    return np.dot(x, y.T)
+try:  # math.isclose was added in Python 3.5; but we might be in 3.4
+    from math import isclose
+except ImportError:
+    def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
+        """Return true if numbers a and b are close to each other."""
+        return abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
-def polynomial_kernel(x, y=None, degree=2.0):
-    if y is None:
-        y = x
-    return (1.0 + np.dot(x, y.T)) ** degree
+def truncated_svd(X, num_val=2, max_iter=1000):
+    """Compute the first component of SVD."""
 
+    def normalize_vec(X, n=2):
+        """Normalize two parts (:m and m:) of the vector."""
+        X_m = X[:m]
+        X_n = X[m:]
+        norm_X_m = norm(X_m, n)
+        Y_m = [x / norm_X_m for x in X_m]
+        norm_X_n = norm(X_n, n)
+        Y_n = [x / norm_X_n for x in X_n]
+        return Y_m + Y_n
 
-def rbf_kernel(x, y=None, gamma=None):
-    """Radial-basis function kernel (aka squared-exponential kernel)."""
-    if y is None:
-        y = x
-    if gamma is None:
-        gamma = 1.0 / x.shape[1]  # 1.0 / n_features
-    return np.exp(-gamma * (-2.0 * np.dot(x, y.T) +
-                            np.sum(x * x, axis=1).reshape((-1, 1)) + np.sum(y * y, axis=1).reshape((1, -1))))
+    def remove_component(X):
+        """Remove components of already obtained eigen vectors from X."""
+        X_m = X[:m]
+        X_n = X[m:]
+        for eivec in eivec_m:
+            coeff = dotproduct(X_m, eivec)
+            X_m = [x1 - coeff * x2 for x1, x2 in zip(X_m, eivec)]
+        for eivec in eivec_n:
+            coeff = dotproduct(X_n, eivec)
+            X_n = [x1 - coeff * x2 for x1, x2 in zip(X_n, eivec)]
+        return X_m + X_n
+
+    m, n = len(X), len(X[0])
+    A = [[0] * (n + m) for _ in range(n + m)]
+    for i in range(m):
+        for j in range(n):
+            A[i][m + j] = A[m + j][i] = X[i][j]
+
+    eivec_m = []
+    eivec_n = []
+    eivals = []
+
+    for _ in range(num_val):
+        X = [random.random() for _ in range(m + n)]
+        X = remove_component(X)
+        X = normalize_vec(X)
+
+        for i in range(max_iter):
+            old_X = X
+            X = matrix_multiplication(A, [[x] for x in X])
+            X = [x[0] for x in X]
+            X = remove_component(X)
+            X = normalize_vec(X)
+            # check for convergence
+            if norm([x1 - x2 for x1, x2 in zip(old_X, X)]) <= 1e-10:
+                break
+
+        projected_X = matrix_multiplication(A, [[x] for x in X])
+        projected_X = [x[0] for x in projected_X]
+        new_eigenvalue = norm(projected_X, 1) / norm(X, 1)
+        ev_m = X[:m]
+        ev_n = X[m:]
+        if new_eigenvalue < 0:
+            new_eigenvalue = -new_eigenvalue
+            ev_m = [-ev_m_i for ev_m_i in ev_m]
+        eivals.append(new_eigenvalue)
+        eivec_m.append(ev_m)
+        eivec_n.append(ev_n)
+    return eivec_m, eivec_n, eivals
 
 
 # ______________________________________________________________________________
@@ -377,7 +507,7 @@ def distance(a, b):
     """The distance between two (x, y) points."""
     xA, yA = a
     xB, yB = b
-    return np.hypot((xA - xB), (yA - yB))
+    return math.hypot((xA - xB), (yA - yB))
 
 
 def distance_squared(a, b):
@@ -387,10 +517,17 @@ def distance_squared(a, b):
     return (xA - xB) ** 2 + (yA - yB) ** 2
 
 
+def vector_clip(vector, lowest, highest):
+    """Return vector, except if any element is less than the corresponding
+    value of lowest or more than the corresponding value of highest, clip to
+    those values."""
+    return type(vector)(map(clip, vector, lowest, highest))
+
+
 # ______________________________________________________________________________
 # Misc Functions
 
-class injection:
+class injection():
     """Dependency injection of temporary values for global functions/classes/etc.
     E.g., `with injection(DataBase=MockDataBase): ...`"""
 
@@ -475,6 +612,7 @@ def failure_test(algorithm, tests):
     to check for correctness. On the other hand, a lot of algorithms output something
     particular on fail (for example, False, or None).
     tests is a list with each element in the form: (values, failure_output)."""
+    from statistics import mean
     return mean(int(algorithm(x) != y) for x, y in tests)
 
 
@@ -593,17 +731,20 @@ class Expr:
     def __call__(self, *args):
         """Call: if 'f' is a Symbol, then f(0) == Expr('f', 0)."""
         if self.args:
-            raise ValueError('Can only do a call for a Symbol, not an Expr')
+            raise ValueError('can only do a call for a Symbol, not an Expr')
         else:
             return Expr(self.op, *args)
 
     # Equality and repr
     def __eq__(self, other):
         """x == y' evaluates to True or False; does not build an Expr."""
-        return isinstance(other, Expr) and self.op == other.op and self.args == other.args
+        return (isinstance(other, Expr)
+                and self.op == other.op
+                and self.args == other.args)
 
     def __lt__(self, other):
-        return isinstance(other, Expr) and str(self) < str(other)
+        return (isinstance(other, Expr)
+                and str(self) < str(other))
 
     def __hash__(self):
         return hash(self.op) ^ hash(self.args)
@@ -678,7 +819,10 @@ def expr(x):
     >>> expr('P & Q ==> Q')
     ((P & Q) ==> Q)
     """
-    return eval(expr_handle_infix_ops(x), defaultkeydict(Symbol)) if isinstance(x, str) else x
+    if isinstance(x, str):
+        return eval(expr_handle_infix_ops(x), defaultkeydict(Symbol))
+    else:
+        return x
 
 
 infix_ops = '==> <== <=>'.split()
@@ -706,8 +850,9 @@ class defaultkeydict(collections.defaultdict):
 
 
 class hashabledict(dict):
-    """Allows hashing by representing a dictionary as tuple of key:value pairs.
-    May cause problems as the hash value may change during runtime."""
+    """Allows hashing by representing a dictionary as tuple of key:value pairs
+       May cause problems as the hash value may change during runtime
+    """
 
     def __hash__(self):
         return 1
@@ -728,12 +873,13 @@ class PriorityQueue:
 
     def __init__(self, order='min', f=lambda x: x):
         self.heap = []
+
         if order == 'min':
             self.f = f
         elif order == 'max':  # now item with max f(x)
             self.f = lambda x: -f(x)  # will be popped first
         else:
-            raise ValueError("Order must be either 'min' or 'max'.")
+            raise ValueError("order must be either 'min' or 'max'.")
 
     def append(self, item):
         """Insert item at its correct position."""
@@ -751,6 +897,14 @@ class PriorityQueue:
             return heapq.heappop(self.heap)[1]
         else:
             raise Exception('Trying to pop from empty PriorityQueue.')
+    
+    def getvalue(self, key):
+        """Returns the first value associated with key in PriorityQueue.
+        Raises KeyError if key is not present."""
+        for value, item in self.heap:
+            if item == key:
+                return value, item
+        raise KeyError(str(key) + " is not in the priority queue")
 
     def __len__(self):
         """Return current capacity of PriorityQueue."""
@@ -759,13 +913,13 @@ class PriorityQueue:
     def __contains__(self, key):
         """Return True if the key is in PriorityQueue."""
         return any([item == key for _, item in self.heap])
-
+    
     def __getitem__(self, key):
         """Returns the first value associated with key in PriorityQueue.
         Raises KeyError if key is not present."""
         for value, item in self.heap:
             if item == key:
-                return value
+                return item
         raise KeyError(str(key) + " is not in the priority queue")
 
     def __delitem__(self, key):
@@ -778,11 +932,27 @@ class PriorityQueue:
 
 
 # ______________________________________________________________________________
+# Monte Carlo tree node and ucb function
+class MCT_Node:
+    """Node in the Monte Carlo search tree, keeps track of the children states"""
+
+    def __init__(self, parent=None, state=None, U=0, N=0):
+        self.__dict__.update(parent=parent, state=state, U=U, N=N)
+        self.children = {}
+        self.actions = None
+
+
+def ucb(n, C=1.4):
+    return (float('inf') if n.N == 0 else
+            n.U / n.N + C * math.sqrt(math.log(n.parent.N) / n.N))
+
+
+# ______________________________________________________________________________
 # Useful Shorthands
 
 
 class Bool(int):
-    """Just like `bool`, except values display as 'T' and 'F' instead of 'True' and 'False'."""
+    """Just like `bool`, except values display as 'T' and 'F' instead of 'True' and 'False'"""
     __str__ = __repr__ = lambda self: 'T' if self else 'F'
 
 
